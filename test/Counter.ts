@@ -1,36 +1,67 @@
+
 import { expect } from "chai";
 import { network } from "hardhat";
 
 const { ethers } = await network.create();
 
 describe("Counter", function () {
-  it("Should emit the Increment event when calling the inc() function", async function () {
+
+  it("Should emit the Increment event when calling inc()", async function () {
     const counter = await ethers.deployContract("Counter");
 
-    await expect(counter.inc()).to.emit(counter, "Increment").withArgs(1n);
+    await expect(counter.inc())
+      .to.emit(counter, "Increment")
+      .withArgs(1n);
   });
 
-  it("The sum of the Increment events should match the current value", async function () {
+  it("Should allow a user to deposit ETH", async function () {
     const counter = await ethers.deployContract("Counter");
-    const deploymentBlockNumber = await ethers.provider.getBlockNumber();
+    const [alice] = await ethers.getSigners();
 
-    // run a series of increments
-    for (let i = 1; i <= 10; i++) {
-      await counter.incBy(i);
-    }
+    await counter.connect(alice).deposit({
+      value: ethers.parseEther("5")
+    });
 
-    const events = await counter.queryFilter(
-      counter.filters.Increment(),
-      deploymentBlockNumber,
-      "latest",
+    expect(await counter.deposits(alice.address))
+      .to.equal(ethers.parseEther("5"));
+
+    expect(await counter.totalDeposits())
+      .to.equal(ethers.parseEther("5"));
+  });
+
+  it("Should allow a user to withdraw ETH", async function () {
+    const counter = await ethers.deployContract("Counter");
+    const [alice] = await ethers.getSigners();
+
+    await counter.connect(alice).deposit({
+      value: ethers.parseEther("5")
+    });
+
+    await counter.connect(alice).withdraw(
+      ethers.parseEther("2")
     );
 
-    // check that the aggregated events match the current value
-    let total = 0n;
-    for (const event of events) {
-      total += event.args.by;
-    }
+    expect(await counter.deposits(alice.address))
+      .to.equal(ethers.parseEther("3"));
 
-    expect(await counter.x()).to.equal(total);
+    expect(await counter.totalDeposits())
+      .to.equal(ethers.parseEther("3"));
+
+    expect(await ethers.provider.getBalance(await counter.getAddress()))
+      .to.equal(ethers.parseEther("3"));
   });
+
+  it("Should reject withdrawals exceeding the user's deposit", async function () {
+    const counter = await ethers.deployContract("Counter");
+    const [alice] = await ethers.getSigners();
+
+    await counter.connect(alice).deposit({
+      value: ethers.parseEther("5")
+    });
+
+    await expect(
+      counter.connect(alice).withdraw(ethers.parseEther("6"))
+    ).to.be.revertedWith("Insufficient balance");
+  });
+
 });
