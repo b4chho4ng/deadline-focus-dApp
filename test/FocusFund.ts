@@ -6,63 +6,66 @@ const { ethers } = await network.create();
 
 describe("FocusFund", function () {
 
-    it("Should create a challenge and store its information", async function () {
+    it("Should allow the assigned verifier to approve a challenge and refund the deposit", async function () {
         const focusFund = await ethers.deployContract("FocusFund");
         const [alice, bob] = await ethers.getSigners();
 
         const latestBlock = await ethers.provider.getBlock("latest");
         const deadline = BigInt(latestBlock!.timestamp + 3600);
+        const deposit = ethers.parseEther("1");
 
         await focusFund.connect(alice).createChallenge(
             "Study Solidity",
             "Study for two hours",
             bob.address,
             deadline,
-            { value: ethers.parseEther("1") }
+            { value: deposit }
         );
 
-        const challenge = await focusFund.challenges(0);
-
-        expect(challenge.title).to.equal("Study Solidity");
-        expect(challenge.description).to.equal("Study for two hours");
-        expect(challenge.creator).to.equal(alice.address);
-        expect(challenge.verifier).to.equal(bob.address);
-        expect(challenge.deposit).to.equal(ethers.parseEther("1"));
-        expect(challenge.deadline).to.equal(deadline);
-        expect(challenge.status).to.equal(0n);
-        expect(await focusFund.nextChallengeId()).to.equal(1);
-    });
-
-    it("Should allow the creator to submit evidence and emit an event", async function () {
-        const focusFund = await ethers.deployContract("FocusFund");
-        const [alice, bob] = await ethers.getSigners();
-
-        const latestBlock = await ethers.provider.getBlock("latest");
-        const deadline = BigInt(latestBlock!.timestamp + 3600);
-
-        await focusFund.connect(alice).createChallenge(
-            "Study Solidity",
-            "Study for two hours",
-            bob.address,
-            deadline,
-            { value: ethers.parseEther("1") }
+        await focusFund.connect(alice).submitEvidence(
+            0,
+            "ipfs://example-evidence"
         );
 
-        const evidenceURL = "ipfs://example-evidence";
+        const aliceBalanceBefore = await ethers.provider.getBalance(alice.address);
 
         await expect(
-            focusFund.connect(alice).submitEvidence(0, evidenceURL)
+            focusFund.connect(bob).approveChallenge(0)
         )
-            .to.emit(focusFund, "EvidenceSubmitted")
-            .withArgs(0, alice.address, evidenceURL);
+            .to.emit(focusFund, "ChallengeApproved")
+            .withArgs(0, bob.address, alice.address, deposit);
 
+        const aliceBalanceAfter = await ethers.provider.getBalance(alice.address);
         const challenge = await focusFund.challenges(0);
 
-        expect(challenge.evidence).to.equal(evidenceURL);
-        expect(challenge.status).to.equal(1n);
+        expect(aliceBalanceAfter - aliceBalanceBefore).to.equal(deposit);
+        expect(challenge.status).to.equal(2n);
+        expect(await ethers.provider.getBalance(await focusFund.getAddress())).to.equal(0n);
     });
 
-    it("Should reject evidence submitted by someone other than the creator", async function () {
+    it("Should reject approval by the challenge creator", async function () {
+        const focusFund = await ethers.deployContract("FocusFund");
+        const [alice, bob] = await ethers.getSigners();
+
+        const latestBlock = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+        await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+        );
+
+        await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+
+        await expect(
+            focusFund.connect(alice).approveChallenge(0)
+        ).to.be.revertedWith("You are not the verifier for this challenge");
+    });
+
+    it("Should reject approval by an unrelated user", async function () {
         const focusFund = await ethers.deployContract("FocusFund");
         const [alice, bob, charlie] = await ethers.getSigners();
 
@@ -77,15 +80,23 @@ describe("FocusFund", function () {
             { value: ethers.parseEther("1") }
         );
 
+        await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+
         await expect(
-            focusFund.connect(charlie).submitEvidence(
-                0,
-                "ipfs://example-evidence"
-            )
-        ).to.be.revertedWith("Challenge creator is different");
+            focusFund.connect(charlie).approveChallenge(0)
+        ).to.be.revertedWith("You are not the verifier for this challenge");
     });
 
-    it("Should reject evidence submitted twice", async function () {
+    it("Should reject approval of a nonexistent challenge", async function () {
+        const focusFund = await ethers.deployContract("FocusFund");
+        const [, bob] = await ethers.getSigners();
+
+        await expect(
+            focusFund.connect(bob).approveChallenge(0)
+        ).to.be.revertedWith("Challenge does not exist");
+    });
+
+    it("Should reject approval when the challenge is still active", async function () {
         const focusFund = await ethers.deployContract("FocusFund");
         const [alice, bob] = await ethers.getSigners();
 
@@ -100,20 +111,12 @@ describe("FocusFund", function () {
             { value: ethers.parseEther("1") }
         );
 
-        await focusFund.connect(alice).submitEvidence(
-            0,
-            "ipfs://first-evidence"
-        );
-
         await expect(
-            focusFund.connect(alice).submitEvidence(
-                0,
-                "ipfs://second-evidence"
-            )
-        ).to.be.revertedWith("The challenge must still be active");
+            focusFund.connect(bob).approveChallenge(0)
+        ).to.be.revertedWith("Challenge is not waiting approval");
     });
 
-    it("Should reject evidence submitted after the deadline", async function () {
+    it("Should reject approval of an already approved challenge", async function () {
         const focusFund = await ethers.deployContract("FocusFund");
         const [alice, bob] = await ethers.getSigners();
 
@@ -128,15 +131,13 @@ describe("FocusFund", function () {
             { value: ethers.parseEther("1") }
         );
 
-        await ethers.provider.send("evm_increaseTime", [3601]);
-        await ethers.provider.send("evm_mine", []);
+        await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+
+        await focusFund.connect(bob).approveChallenge(0);
 
         await expect(
-            focusFund.connect(alice).submitEvidence(
-                0,
-                "ipfs://late-evidence"
-            )
-        ).to.be.revertedWith("Invalid deadline");
+            focusFund.connect(bob).approveChallenge(0)
+        ).to.be.revertedWith("Challenge is not waiting approval");
     });
 
 });

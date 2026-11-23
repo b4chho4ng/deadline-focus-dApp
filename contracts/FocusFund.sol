@@ -37,6 +37,13 @@ contract FocusFund {
         string evidence
     );
 
+    event ChallengeApproved(
+        uint indexed challengeId,
+        address indexed verifier,
+        address indexed creator,
+        uint depositReturned
+    );
+
 
     function createChallenge(string memory title, string memory description, address verifier, uint deadline) public payable {
         require(msg.value > 0, "Deposit must be more than 0");
@@ -72,5 +79,28 @@ contract FocusFund {
         challenges[challengeId].status = ChallengeStatus.Submitted;
 
         emit EvidenceSubmitted(challengeId, msg.sender, evidenceURL);
+    }
+
+
+
+    function approveChallenge(uint challengeId) public {
+        require(challengeId < nextChallengeId, "Challenge does not exist");
+        require(msg.sender == challenges[challengeId].verifier, "You are not the verifier for this challenge");
+        require(challenges[challengeId].status == ChallengeStatus.Submitted, "Challenge is not waiting approval");
+
+        uint depositReturned = challenges[challengeId].deposit;
+
+        challenges[challengeId].status = ChallengeStatus.Approved;
+
+        (bool success, ) = payable(challenges[challengeId].creator).call{value: depositReturned}("");
+        require(success, "Transfer back failed");
+
+        emit ChallengeApproved(
+            challengeId,
+            msg.sender,
+            challenges[challengeId].creator,
+            depositReturned
+        );
+
     }
 }
