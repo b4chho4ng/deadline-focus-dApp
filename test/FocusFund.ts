@@ -470,4 +470,564 @@ describe("FocusFund", function () {
     });
 
 
+    describe("Verifier replacement", function () {
+
+        it("Should allow the creator to replace the verifier after the review deadline", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob, charlie] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(
+            0,
+            "ipfs://example-evidence"
+            );
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(focusFund.connect(alice).replaceVerifier(0, charlie.address))
+            .to.emit(focusFund, "VerifierReplaced")
+            .withArgs(0, bob.address, charlie.address);
+
+            const challenge = await focusFund.challenges(0);
+
+            expect(challenge.verifier).to.equal(charlie.address);
+        });
+
+
+        it("Should not allow someone other than the creator to replace the verifier", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob, charlie] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(focusFund.connect(charlie).replaceVerifier(0, charlie.address))
+            .to.be.revertedWith("Only creator can replace verifier");
+        });
+
+
+        it("Should not allow replacement before the review deadline", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob, charlie] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await expect(focusFund.connect(alice).replaceVerifier(0, charlie.address))
+            .to.be.revertedWith("Review deadline has not passed");
+        });
+
+
+        it("Should not allow the creator to select themselves as the new verifier", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(focusFund.connect(alice).replaceVerifier(0, alice.address))
+            .to.be.revertedWith("Invalid verifier");
+        });
+
+
+        it("Should not allow the creator to select the current verifier again", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(focusFund.connect(alice).replaceVerifier(0, bob.address))
+            .to.be.revertedWith("Invalid verifier");
+        });
+
+
+        it("Should not allow the zero address as the new verifier", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(
+            focusFund.connect(alice).replaceVerifier(0, ethers.ZeroAddress)
+            ).to.be.revertedWith("Invalid verifier");
+        });
+
+
+        it("Should not allow replacement for a nonexistent challenge", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, , charlie] = await ethers.getSigners();
+
+            await expect(focusFund.connect(alice).replaceVerifier(0, charlie.address))
+            .to.be.revertedWith("Challenge does not exist");
+        });
+
+
+        it("Should reset the review deadline after replacing the verifier", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob, charlie] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await focusFund.connect(alice).replaceVerifier(0, charlie.address);
+
+            const challenge = await focusFund.challenges(0);
+            const currentBlock = await ethers.provider.getBlock("latest");
+
+            expect(challenge.reviewDeadline).to.equal(
+            BigInt(currentBlock!.timestamp) + BigInt(7 * 24 * 60 * 60)
+            );
+        });
+
+
+        it("Should prevent the old verifier from approving after replacement", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob, charlie] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://example-evidence");
+
+            await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 1]);
+            await ethers.provider.send("evm_mine", []);
+
+            await focusFund.connect(alice).replaceVerifier(0, charlie.address);
+
+            await expect(focusFund.connect(bob).approveChallenge(0))
+            .to.be.revertedWith("You are not the verifier for this challenge");
+        });
+
+    });
+
+    
+    describe("Charity contributions", function () {
+
+        it("Should allow a user to contribute part of their lost funds", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(alice).openCharityEvent();
+
+            await expect(focusFund.connect(alice).contributeToCharity(ethers.parseEther("0.4")))
+            .to.emit(focusFund, "ContributedToCharity")
+            .withArgs(alice.address, ethers.parseEther("0.4"));
+
+            expect(await focusFund.lostFunds(alice.address))
+            .to.equal(ethers.parseEther("0.6"));
+
+            expect(await focusFund.charityPool())
+            .to.equal(ethers.parseEther("0.4"));
+        });
+
+
+        it("Should allow a user to contribute their entire lost-funds balance", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(alice).openCharityEvent();
+
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+
+            expect(await focusFund.lostFunds(alice.address)).to.equal(0);
+            expect(await focusFund.charityPool()).to.equal(ethers.parseEther("1"));
+        });
+
+
+        it("Should not allow contributions when no charity event is active", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await expect(
+            focusFund.connect(alice).contributeToCharity(ethers.parseEther("0.5"))
+            ).to.be.revertedWith("No active charity event right now");
+        });
+
+
+        it("Should not allow a zero contribution", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(alice).openCharityEvent();
+
+            await expect(
+            focusFund.connect(alice).contributeToCharity(0)
+            ).to.be.revertedWith("Invalid donation amount");
+        });
+
+
+        it("Should not allow a user to contribute more than their lost funds", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(alice).openCharityEvent();
+
+            await expect(
+            focusFund.connect(alice).contributeToCharity(ethers.parseEther("1.1"))
+            ).to.be.revertedWith("Insufficient funds");
+        });
+
+    });
+
+
+    describe("Charity withdrawals", function () {
+
+        it("Should allow the admin to withdraw the charity pool", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob, recipient] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+            await focusFund.connect(admin).closeCharityEvent();
+
+            await expect(focusFund.connect(admin).withdrawCharityFunds(recipient.address))
+            .to.emit(focusFund, "CharityFundsWithdrawn")
+            .withArgs(recipient.address, ethers.parseEther("1"));
+
+            expect(await focusFund.charityPool()).to.equal(0);
+        });
+
+
+        it("Should not allow someone other than the admin to withdraw", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+            await focusFund.connect(admin).closeCharityEvent();
+
+            await expect(
+            focusFund.connect(alice).withdrawCharityFunds(admin.address)
+            ).to.be.revertedWith("Only admin can call this function");
+        });
+
+
+        it("Should not allow withdrawal while a charity event is active", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+
+            await expect(
+            focusFund.connect(admin).withdrawCharityFunds(bob.address)
+            ).to.be.revertedWith("Event is still active");
+        });
+
+
+        it("Should not allow the zero address as recipient", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+            await focusFund.connect(admin).closeCharityEvent();
+
+            await expect(
+            focusFund.connect(admin).withdrawCharityFunds(ethers.ZeroAddress)
+            ).to.be.revertedWith("Invalid recipient");
+        });
+
+
+        it("Should not allow withdrawal when the charity pool is empty", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, recipient] = await ethers.getSigners();
+
+            await expect(
+            focusFund.connect(admin).withdrawCharityFunds(recipient.address)
+            ).to.be.revertedWith("Insufficient charity pool");
+        });
+
+
+        it("Should transfer the ETH to the recipient", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob, recipient] = await ethers.getSigners();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+            await focusFund.connect(admin).closeCharityEvent();
+
+            const recipientBalanceBefore = await ethers.provider.getBalance(recipient.address);
+
+            await focusFund.connect(admin).withdrawCharityFunds(recipient.address);
+
+            const recipientBalanceAfter = await ethers.provider.getBalance(recipient.address);
+
+            expect(recipientBalanceAfter - recipientBalanceBefore)
+            .to.equal(ethers.parseEther("1"));
+        });
+
+
+        it("Should preserve the charity pool if the recipient rejects ETH", async function () {
+            const focusFund = await ethers.deployContract("FocusFund");
+            const [admin, alice, bob] = await ethers.getSigners();
+
+            const RejectEther = await ethers.getContractFactory("RejectEther");
+            const rejectEther = await RejectEther.deploy();
+
+            const latestBlock = await ethers.provider.getBlock("latest");
+            const deadline = BigInt(latestBlock!.timestamp + 3600);
+
+            await focusFund.connect(alice).createChallenge(
+            "Study Solidity",
+            "Study for two hours",
+            bob.address,
+            deadline,
+            { value: ethers.parseEther("1") }
+            );
+
+            await focusFund.connect(alice).submitEvidence(0, "ipfs://evidence");
+            await focusFund.connect(bob).rejectChallenge(0);
+
+            await focusFund.connect(admin).openCharityEvent();
+            await focusFund.connect(alice).contributeToCharity(ethers.parseEther("1"));
+            await focusFund.connect(admin).closeCharityEvent();
+
+            await expect(
+            focusFund.connect(admin).withdrawCharityFunds(await rejectEther.getAddress())
+            ).to.be.revertedWith("Transfer error");
+
+            expect(await focusFund.charityPool()).to.equal(ethers.parseEther("1"));
+        });
+
+    });
+
+
+
 });
